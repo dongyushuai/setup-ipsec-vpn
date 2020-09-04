@@ -11,7 +11,7 @@
 # know how you have improved it!
 
 # Specify which Libreswan version to install. See: https://libreswan.org
-SWAN_VER=3.31
+SWAN_VER=3.32
 
 ### DO NOT edit below this line ###
 
@@ -46,14 +46,14 @@ if [ "$(id -u)" != 0 ]; then
 fi
 
 case "$SWAN_VER" in
-  3.19|3.2[01235679]|3.31)
+  3.19|3.2[01235679]|3.3[12])
     /bin/true
     ;;
   *)
 cat 1>&2 <<EOF
 Error: Libreswan version '$SWAN_VER' is not supported.
   This script can install one of the following versions:
-  3.19-3.23, 3.25-3.27, 3.29 and 3.31
+  3.19-3.23, 3.25-3.27, 3.29, 3.31 and 3.32
 EOF
     exit 1
     ;;
@@ -61,7 +61,7 @@ esac
 
 dns_state=0
 case "$SWAN_VER" in
-  3.2[35679]|3.31)
+  3.2[35679]|3.3[12])
     DNS_SRV1=$(grep "modecfgdns1=" /etc/ipsec.conf | head -n 1 | cut -d '=' -f 2)
     DNS_SRV2=$(grep "modecfgdns2=" /etc/ipsec.conf | head -n 1 | cut -d '=' -f 2)
     [ -n "$DNS_SRV1" ] && dns_state=2
@@ -89,14 +89,14 @@ if printf '%s' "$ipsec_ver" | grep -qF "$SWAN_VER"; then
   echo "You already have Libreswan version $SWAN_VER installed! "
   echo "If you continue, the same version will be re-installed."
   echo
-  printf "Do you wish to continue anyway? [y/N] "
+  printf "Do you want to continue anyway? [y/N] "
   read -r response
   case $response in
     [yY][eE][sS]|[yY])
       echo
       ;;
     *)
-      echo "Aborting."
+      echo "Abort. No changes were made."
       exit 1
       ;;
   esac
@@ -136,7 +136,7 @@ cat <<'EOF'
 EOF
 fi
 
-if [ "$SWAN_VER" = "3.29" ] || [ "$SWAN_VER" = "3.31" ]; then
+if [ "$SWAN_VER" = "3.29" ] || [ "$SWAN_VER" = "3.31" ] || [ "$SWAN_VER" = "3.32" ]; then
 cat <<'EOF'
     - Move "ikev2=never" to section "conn shared"
 EOF
@@ -149,7 +149,7 @@ cat <<'EOF'
 EOF
 
 case "$SWAN_VER" in
-  3.19|3.2[01235679])
+  3.19|3.2[01235679]|3.31)
 cat <<'EOF'
 WARNING: Older versions of Libreswan could contain known security vulnerabilities.
     See: https://libreswan.org/security/
@@ -170,7 +170,7 @@ EOF
     ;;
 esac
 
-printf "Do you wish to continue? [y/N] "
+printf "Do you want to continue? [y/N] "
 read -r response
 case $response in
   [yY][eE][sS]|[yY])
@@ -179,7 +179,7 @@ case $response in
     echo
     ;;
   *)
-    echo "Aborting."
+    echo "Abort. No changes were made."
     exit 1
     ;;
 esac
@@ -212,15 +212,20 @@ cd "libreswan-$SWAN_VER" || exit 1
 [ "$SWAN_VER" = "3.23" ] || [ "$SWAN_VER" = "3.25" ] && sed -i '/docker-targets\.mk/d' Makefile
 [ "$SWAN_VER" = "3.26" ] && sed -i 's/-lfreebl //' mk/config.mk
 [ "$SWAN_VER" = "3.26" ] && sed -i '/blapi\.h/d' programs/pluto/keys.c
+if [ "$SWAN_VER" = "3.31" ]; then
+  sed -i '916iif (!st->st_seen_fragvid) { return FALSE; }' programs/pluto/ikev2.c
+  sed -i '1033s/if (/if (LIN(POLICY_IKE_FRAG_ALLOW, sk->ike->sa.st_connection->policy) \&\& sk->ike->sa.st_seen_fragvid \&\& /' \
+    programs/pluto/ikev2_message.c
+fi
 cat > Makefile.inc.local <<'EOF'
-WERROR_CFLAGS =
+WERROR_CFLAGS = -w
 USE_DNSSEC = false
 USE_DH31 = false
 USE_NSS_AVA_COPY = true
 USE_NSS_IPSEC_PROFILE = false
 USE_GLIBC_KERN_FLIP_HEADERS = true
 EOF
-if [ "$SWAN_VER" = "3.31" ]; then
+if [ "$SWAN_VER" = "3.31" ] || [ "$SWAN_VER" = "3.32" ]; then
   echo "USE_DH2 = true" >> Makefile.inc.local
   if ! grep -qs IFLA_XFRM_LINK /usr/include/linux/if_link.h; then
     echo "USE_XFRM_INTERFACE_IFLA_HEADER = true" >> Makefile.inc.local
@@ -245,7 +250,9 @@ IKE_NEW="  ike=aes256-sha2,aes128-sha2,aes256-sha1,aes128-sha1,aes256-sha2;modp1
 PHASE2_NEW="  phase2alg=aes_gcm-null,aes128-sha1,aes256-sha1,aes256-sha2_512,aes128-sha2,aes256-sha2"
 
 if uname -m | grep -qi '^arm'; then
-  PHASE2_NEW="  phase2alg=aes_gcm-null,aes128-sha1,aes256-sha1,aes128-sha2,aes256-sha2"
+  if ! modprobe -q sha512; then
+    PHASE2_NEW="  phase2alg=aes_gcm-null,aes128-sha1,aes256-sha1,aes128-sha2,aes256-sha2"
+  fi
 fi
 
 sed -i".old-$(date +%F-%T)" \
@@ -266,9 +273,9 @@ elif [ "$dns_state" = "4" ]; then
   sed -i "s/modecfgdns=.*/modecfgdns1=$DNS_SRV1/" /etc/ipsec.conf
 fi
 
-if [ "$SWAN_VER" = "3.29" ] || [ "$SWAN_VER" = "3.31" ]; then
+if [ "$SWAN_VER" = "3.29" ] || [ "$SWAN_VER" = "3.31" ] || [ "$SWAN_VER" = "3.32" ]; then
   sed -i "/ikev2=never/d" /etc/ipsec.conf
-  sed -i "/dpdaction=clear/a \  ikev2=never" /etc/ipsec.conf
+  sed -i "/conn shared/a \  ikev2=never" /etc/ipsec.conf
 fi
 
 # Restart IPsec service
@@ -278,11 +285,11 @@ service ipsec restart
 cat <<EOF
 
 
-===================================================
+===========================================
 
-Libreswan $SWAN_VER has been successfully installed!
+Libreswan $SWAN_VER successfully installed!
 
-===================================================
+===========================================
 
 EOF
 

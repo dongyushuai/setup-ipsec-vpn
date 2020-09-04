@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Script for automatic setup of an IPsec VPN server on Ubuntu LTS and Debian.
+# Script for automatic setup of an IPsec VPN server on Ubuntu and Debian.
 # Works on any dedicated server or virtual private server (VPS) except OpenVZ.
 #
 # DO NOT RUN THIS SCRIPT ON YOUR PC OR MAC!
@@ -30,11 +30,12 @@ YOUR_PASSWORD=''
 
 # Important notes:   https://git.io/vpnnotes
 # Setup VPN clients: https://git.io/vpnclients
+# IKEv2 guide:       https://git.io/ikev2
 
 # =====================================================
 
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-SYS_DT=$(date +%F-%T)
+SYS_DT=$(date +%F-%T | tr ':' '_')
 
 exiterr()  { echo "Error: $1" >&2; exit 1; }
 exiterr2() { exiterr "'apt-get install' failed."; }
@@ -116,6 +117,15 @@ case "$VPN_IPSEC_PSK $VPN_USER $VPN_PASSWORD" in
     ;;
 esac
 
+if { [ -n "$VPN_DNS_SRV1" ] && ! check_ip "$VPN_DNS_SRV1"; } \
+  || { [ -n "$VPN_DNS_SRV2" ] && ! check_ip "$VPN_DNS_SRV2"; } then
+  exiterr "The DNS server specified is invalid."
+fi
+
+if [ -x /sbin/iptables ] && ! iptables -nL INPUT >/dev/null 2>&1; then
+  exiterr "IPTables check failed. Reboot and re-run this script."
+fi
+
 bigecho "VPN setup in progress... Please be patient."
 
 # Create and change to working dir
@@ -172,7 +182,7 @@ apt-get -yq install fail2ban || exiterr2
 
 bigecho "Compiling and installing Libreswan..."
 
-SWAN_VER=3.31
+SWAN_VER=3.32
 swan_file="libreswan-$SWAN_VER.tar.gz"
 swan_url1="https://github.com/libreswan/libreswan/archive/v$SWAN_VER.tar.gz"
 swan_url2="https://download.libreswan.org/$swan_file"
@@ -183,7 +193,7 @@ fi
 tar xzf "$swan_file" && /bin/rm -f "$swan_file"
 cd "libreswan-$SWAN_VER" || exit 1
 cat > Makefile.inc.local <<'EOF'
-WERROR_CFLAGS =
+WERROR_CFLAGS = -w
 USE_DNSSEC = false
 USE_DH2 = true
 USE_DH31 = false
@@ -269,10 +279,14 @@ conn xauth-psk
   ike-frag=yes
   cisco-unity=yes
   also=shared
+
+include /etc/ipsec.d/*.conf
 EOF
 
 if uname -m | grep -qi '^arm'; then
-  sed -i '/phase2alg/s/,aes256-sha2_512//' /etc/ipsec.conf
+  if ! modprobe -q sha512; then
+    sed -i '/phase2alg/s/,aes256-sha2_512//' /etc/ipsec.conf
+  fi
 fi
 
 # Specify IPsec PSK
@@ -373,17 +387,13 @@ fi
 
 bigecho "Updating IPTables rules..."
 
-# Check if rules need updating
+IPT_FILE=/etc/iptables.rules
+IPT_FILE2=/etc/iptables/rules.v4
 ipt_flag=0
-IPT_FILE="/etc/iptables.rules"
-IPT_FILE2="/etc/iptables/rules.v4"
-if ! grep -qs "hwdsl2 VPN script" "$IPT_FILE" \
-   || ! iptables -t nat -C POSTROUTING -s "$L2TP_NET" -o "$NET_IFACE" -j MASQUERADE 2>/dev/null \
-   || ! iptables -t nat -C POSTROUTING -s "$XAUTH_NET" -o "$NET_IFACE" -m policy --dir out --pol none -j MASQUERADE 2>/dev/null; then
+if ! grep -qs "hwdsl2 VPN script" "$IPT_FILE"; then
   ipt_flag=1
 fi
 
-# Add IPTables rules for VPN
 if [ "$ipt_flag" = "1" ]; then
   service fail2ban stop >/dev/null 2>&1
   iptables-save > "$IPT_FILE.old-$SYS_DT"
@@ -399,7 +409,7 @@ if [ "$ipt_flag" = "1" ]; then
   iptables -I FORWARD 4 -i ppp+ -o ppp+ -s "$L2TP_NET" -d "$L2TP_NET" -j ACCEPT
   iptables -I FORWARD 5 -i "$NET_IFACE" -d "$XAUTH_NET" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
   iptables -I FORWARD 6 -s "$XAUTH_NET" -o "$NET_IFACE" -j ACCEPT
-  # Uncomment if you wish to disallow traffic between VPN clients themselves
+  # Uncomment to disallow traffic between VPN clients
   # iptables -I FORWARD 2 -i ppp+ -o ppp+ -s "$L2TP_NET" -d "$L2TP_NET" -j DROP
   # iptables -I FORWARD 3 -s "$XAUTH_NET" -d "$XAUTH_NET" -j DROP
   iptables -A FORWARD -j DROP
@@ -416,9 +426,8 @@ fi
 
 bigecho "Enabling services on boot..."
 
-# Check for iptables-persistent
-IPT_PST="/etc/init.d/iptables-persistent"
-IPT_PST2="/usr/share/netfilter-persistent/plugins.d/15-ip4tables"
+IPT_PST=/etc/init.d/iptables-persistent
+IPT_PST2=/usr/share/netfilter-persistent/plugins.d/15-ip4tables
 ipt_load=1
 if [ -f "$IPT_FILE2" ] && { [ -f "$IPT_PST" ] || [ -f "$IPT_PST2" ]; }; then
   ipt_load=0
@@ -482,17 +491,11 @@ fi
 
 bigecho "Starting services..."
 
-# Reload sysctl.conf
 sysctl -e -q -p
 
-# Update file attributes
 chmod +x /etc/rc.local
 chmod 600 /etc/ipsec.secrets* /etc/ppp/chap-secrets* /etc/ipsec.d/passwd*
 
-# Apply new IPTables rules
-iptables-restore < "$IPT_FILE"
-
-# Restart services
 mkdir -p /run/pluto
 service fail2ban restart 2>/dev/null
 service ipsec restart 2>/dev/null
@@ -515,6 +518,7 @@ Write these down. You'll need them to connect!
 
 Important notes:   https://git.io/vpnnotes
 Setup VPN clients: https://git.io/vpnclients
+IKEv2 guide:       https://git.io/ikev2
 
 ================================================
 

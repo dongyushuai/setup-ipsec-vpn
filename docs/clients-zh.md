@@ -96,7 +96,7 @@ Add-VpnConnection -Name 'My IPsec VPN' -ServerAddress '你的 VPN 服务器 IP' 
 1. 单击 **好**。
 1. 选中 **在菜单栏中显示 VPN 状态** 复选框。
 1. **（重要）** 单击 **高级** 按钮，并选中 **通过VPN连接发送所有通信** 复选框。
-1. 单击 **TCP/IP** 选项卡，并在 **配置IPv6** 部分中选择 **仅本地链接**。
+1. **（重要）** 单击 **TCP/IP** 选项卡，并在 **配置IPv6** 部分中选择 **仅本地链接**。
 1. 单击 **好** 关闭高级设置，然后单击 **应用** 保存VPN连接信息。
 
 要连接到 VPN： 使用菜单栏中的图标，或者打开系统偏好设置的网络部分，选择 VPN 并单击 **连接**。最后你可以到 <a href="https://www.ipchicken.com" target="_blank">这里</a> 检测你的 IP 地址，应该显示为`你的 VPN 服务器 IP`。
@@ -167,7 +167,7 @@ VPN 连接成功后，网络状态图标上会出现 VPN 指示。最后你可�
 
 ### Ubuntu Linux
 
-Ubuntu 18.04 （和更新版本）用户可以安装 <a href="https://packages.ubuntu.com/search?keywords=network-manager-l2tp-gnome" target="_blank">network-manager-l2tp-gnome</a> 软件包，然后通过 GUI 配置 IPsec/L2TP VPN 客户端。Ubuntu 16.04 用户可能需要添加 `nm-l2tp` PPA，参见 <a href="https://medium.com/@hkdb/ubuntu-16-04-connecting-to-l2tp-over-ipsec-via-network-manager-204b5d475721" target="_blank">这里</a>。
+Ubuntu 18.04 （和更新版本）用户可以使用 `apt` 安装 <a href="https://packages.ubuntu.com/search?keywords=network-manager-l2tp-gnome" target="_blank">network-manager-l2tp-gnome</a> 软件包，然后通过 GUI 配置 IPsec/L2TP VPN 客户端。Ubuntu 16.04 用户可能需要添加 `nm-l2tp` PPA，参见 <a href="https://medium.com/@hkdb/ubuntu-16-04-connecting-to-l2tp-over-ipsec-via-network-manager-204b5d475721" target="_blank">这里</a>。
 
 1. 进入 Settings -> Network -> VPN。单击 **+** 按钮。
 1. 选择 **Layer 2 Tunneling Protocol (L2TP)**。
@@ -193,7 +193,7 @@ VPN 连接成功后，你可以到 <a href="https://www.ipchicken.com" target="_
 
 ### Fedora 和 CentOS
 
-Fedora 28 （和更新版本）和 CentOS 7 用户可以使用更高效的 [IPsec/XAuth](clients-xauth-zh.md#linux) 模式连接。
+Fedora 28 （和更新版本）和 CentOS 8/7 用户可以使用更高效的 [IPsec/XAuth](clients-xauth-zh.md#linux) 模式连接。
 
 ### 其它 Linux
 
@@ -208,15 +208,15 @@ Fedora 28 （和更新版本）和 CentOS 7 用户可以使用更高效的 [IPse
 * [Windows 10 正在连接](#windows-10-正在连接)
 * [Windows 10 升级](#windows-10-升级)
 * [Windows 8/10 DNS 泄漏](#windows-810-dns-泄漏)
-* [macOS VPN 流量](#macos-vpn-流量)
+* [Android MTU/MSS 问题](#android-mtumss-问题)
 * [Android 6 和 7](#android-6-和-7)
+* [macOS 通过 VPN 发送通信](#macos-通过-vpn-发送通信)
 * [iOS 13 和 macOS 10.15](#ios-13-和-macos-1015)
 * [iOS/Android 睡眠模式](#iosandroid-睡眠模式)
 * [Debian 10 内核](#debian-10-内核)
 * [Chromebook 连接问题](#chromebook-连接问题)
-* [访问 VPN 服务器的网段](#访问-vpn-服务器的网段)
 * [其它错误](#其它错误)
-* [额外的步骤](#额外的步骤)
+* [检查日志及 VPN 状态](#检查日志及-vpn-状态)
 
 ### Windows 错误 809
 
@@ -282,11 +282,24 @@ Windows 8.x 和 10 默认使用 "smart multi-homed name resolution" （智能多
 
 另外，如果你的计算机启用了 IPv6，所有的 IPv6 流量（包括 DNS 请求）都将绕过 VPN。要在 Windows 上禁用 IPv6，请看<a href="https://support.microsoft.com/zh-cn/help/929852/guidance-for-configuring-ipv6-in-windows-for-advanced-users" target="_blank">这里</a>。
 
-### macOS VPN 流量
+### Android MTU/MSS 问题
 
-OS X (macOS) 用户： 如果你成功地使用 IPsec/L2TP 模式连接，但是你的公有 IP 没有显示为 `你的 VPN 服务器 IP`，请阅读上面的 [OS X](#os-x) 部分并完成这一步：单击 **高级** 按钮，并选中 **通过VPN连接发送所有通信** 复选框。然后重新连接 VPN。
+某些 Android 设备有 MTU/MSS 问题，表现为使用 IPsec/XAuth ("Cisco IPsec") 模式可以连接到 VPN 但是无法打开网站。如果你遇到该问题，尝试在 VPN 服务器上运行以下命令。如果成功解决，你可以将这些命令添加到 `/etc/rc.local` 以使它们重启后继续有效。
 
-如果你的计算机仍然不能通过 VPN 连接发送通信，检查一下服务顺序。进入系统偏好设置中的网络部分，单击左侧连接列表下方的齿轮按钮，选择 "设定服务顺序"。然后将 VPN 连接拖动到顶端。
+```
+iptables -t mangle -A FORWARD -m policy --pol ipsec --dir in \
+  -p tcp -m tcp --tcp-flags SYN,RST SYN -m tcpmss --mss 1361:1536 \
+  -j TCPMSS --set-mss 1360
+iptables -t mangle -A FORWARD -m policy --pol ipsec --dir out \
+  -p tcp -m tcp --tcp-flags SYN,RST SYN -m tcpmss --mss 1361:1536 \
+  -j TCPMSS --set-mss 1360
+
+echo 1 > /proc/sys/net/ipv4/ip_no_pmtu_disc
+```
+
+**Docker 用户：** 要修复这个问题，不需要运行以上命令。你可以在<a href="https://github.com/hwdsl2/docker-ipsec-vpn-server/blob/master/README-zh.md#如何使用本镜像" target="_blank">你的 env 文件</a>中添加 `VPN_ANDROID_MTU_FIX=yes`，然后重新创建 Docker 容器。
+
+参考链接：<a href="https://wiki.strongswan.org/projects/strongswan/wiki/ForwardingAndSplitTunneling#MTUMSS-issues" target="_blank">[1]</a> <a href="https://www.zeitgeist.se/2013/11/26/mtu-woes-in-ipsec-tunnels-how-to-fix/" target="_blank">[2]</a>。
 
 ### Android 6 和 7
 
@@ -295,7 +308,18 @@ OS X (macOS) 用户： 如果你成功地使用 IPsec/L2TP 模式连接，但是
 1. 单击 VPN 连接旁边的设置按钮，选择 "Show advanced options" 并且滚动到底部。如果选项 "Backward compatible mode" 存在（看下图），请启用它并重试连接。如果不存在，请尝试下一步。
 1. 编辑 VPN 服务器上的 `/etc/ipsec.conf`。找到 `sha2-truncbug` 一行并切换它的值。也就是说，将 `sha2-truncbug=no` 替换为 `sha2-truncbug=yes`，或者将 `sha2-truncbug=yes` 替换为 `sha2-truncbug=no`。保存修改并运行 `service ipsec restart`。然后重新连接 VPN。
 
+**Docker 用户：** 如需在 `/etc/ipsec.conf` 中设置 `sha2-truncbug=yes`（默认为 `no`），你可以在<a href="https://github.com/hwdsl2/docker-ipsec-vpn-server/blob/master/README-zh.md#如何使用本镜像" target="_blank">你的 env 文件</a>中添加 `VPN_SHA2_TRUNCBUG=yes`，然后重新创建 Docker 容器。
+
 ![Android VPN workaround](images/vpn-profile-Android.png)
+
+### macOS 通过 VPN 发送通信
+
+OS X (macOS) 用户： 如果可以成功地使用 IPsec/L2TP 模式连接，但是你的公有 IP 没有显示为 `你的 VPN 服务器 IP`，请阅读上面的 [OS X](#os-x) 部分并完成以下步骤。保存 VPN 配置然后重新连接。
+
+1. 单击 **高级** 按钮，并选中 **通过VPN连接发送所有通信** 复选框。
+1. 单击 **TCP/IP** 选项卡，并在 **配置IPv6** 部分中选择 **仅本地链接**。
+
+如果在尝试上面步骤之后，你的计算机仍然不能通过 VPN 连接发送通信，检查一下服务顺序。进入系统偏好设置中的网络部分，单击左侧连接列表下方的齿轮按钮，选择 "设定服务顺序"。然后将 VPN 连接拖动到顶端。
 
 ### iOS 13 和 macOS 10.15
 
@@ -317,22 +341,6 @@ Debian 10 用户： 运行 `uname -r` 以检查你的服务器的 Linux 内核�
 
 Chromebook 用户： 如果你无法连接，请尝试以下步骤：编辑 VPN 服务器上的 `/etc/ipsec.conf`。找到这一行 `phase2alg=...` 并在结尾加上 `,aes_gcm-null` 。保存修改并运行 `service ipsec restart`。
 
-### 访问 VPN 服务器的网段
-
-如果要允许 VPN 客户端访问 VPN 服务器所在的网段，你需要在搭建 VPN 服务器之后手动添加 IPTables 规则。例如，如果网段是 `192.168.0.0/24`：
-
-```
-# For IPsec/L2TP
-iptables -I FORWARD 2 -i ppp+ -d 192.168.0.0/24 -j ACCEPT
-iptables -I FORWARD 2 -s 192.168.0.0/24 -o ppp+ -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-
-# For IPsec/XAuth ("Cisco IPsec")
-iptables -I FORWARD 2 -s 192.168.43.0/24 -d 192.168.0.0/24 -j ACCEPT
-iptables -I FORWARD 2 -s 192.168.0.0/24 -d 192.168.43.0/24 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-```
-
-为了让这些 IPTables 规则在重启后继续有效，你可以将它们添加到文件 `/etc/iptables.rules` 和/或 `/etc/iptables/rules.v4` (Ubuntu/Debian)，或者 `/etc/sysconfig/iptables` (CentOS/RHEL)。
-
 ### 其它错误
 
 如果你遇到其它错误，请参见以下链接：
@@ -342,9 +350,9 @@ iptables -I FORWARD 2 -s 192.168.0.0/24 -d 192.168.43.0/24 -m conntrack --ctstat
 * https://blogs.technet.microsoft.com/rrasblog/2009/08/12/troubleshooting-common-vpn-related-errors/   
 * https://stackoverflow.com/questions/25245854/windows-8-1-gets-error-720-on-connect-vpn
 
-### 额外的步骤
+### 检查日志及 VPN 状态
 
-请尝试下面这些额外的故障排除步骤：
+以下命令需要使用 `root` 账户（或者 `sudo`）运行。
 
 首先，重启 VPN 服务器上的相关服务：
 
@@ -353,7 +361,7 @@ service ipsec restart
 service xl2tpd restart
 ```
 
-如果你使用 Docker，请运行 `docker restart ipsec-vpn-server`。
+**Docker 用户：** 运行 `docker restart ipsec-vpn-server`。
 
 然后重启你的 VPN 客户端设备，并重试连接。如果仍然无法连接，可以尝试删除并重新创建 VPN 连接，按照本文档中的步骤操作。请确保输入了正确的 VPN 登录凭证。
 
@@ -384,21 +392,21 @@ ipsec whack --trafficstatus
 
 ## 使用命令行配置 Linux VPN 客户端
 
-以下步骤是基于 [Peter Sanford 的工作](https://gist.github.com/psanford/42c550a1a6ad3cb70b13e4aaa94ddb1c)。这些命令必须在你的 VPN 客户端上使用 `root` 账户运行。
+在成功 <a href="../README-zh.md" target="_blank">搭建自己的 VPN 服务器</a> 之后，按照下面的步骤来使用命令行配置 Linux VPN 客户端。另外，你也可以 [使用图形界面](#linux) 配置。以下步骤是基于 [Peter Sanford 的工作](https://gist.github.com/psanford/42c550a1a6ad3cb70b13e4aaa94ddb1c)。这些命令必须在你的 VPN 客户端上使用 `root` 账户运行。
 
 要配置 VPN 客户端，首先安装以下软件包：
 
 ```bash
 # Ubuntu & Debian
 apt-get update
-apt-get -y install strongswan xl2tpd
+apt-get -y install strongswan xl2tpd net-tools
 
 # CentOS & RHEL
 yum -y install epel-release
-yum --enablerepo=epel -y install strongswan xl2tpd
+yum --enablerepo=epel -y install strongswan xl2tpd net-tools
 
 # Fedora
-yum -y install strongswan xl2tpd
+yum -y install strongswan xl2tpd net-tools
 ```
 
 创建 VPN 变量 （替换为你自己的值）：
